@@ -1,3 +1,76 @@
-from django.test import TestCase
+import datetime
 
-# Create your tests here.
+from django.test import TestCase
+from django.utils import timezone
+from django.urls import reverse
+
+from .models import Question
+
+class QuestionMethodTests(TestCase):
+
+	def test_was_published_recently_with_alltime_question(self):
+		now = timezone.now()
+		future_question = Question(pub_date=now+datetime.timedelta(days=30))
+		old_question = Question(pub_date=now-datetime.timedelta(days=30))
+		recent_question = Question(pub_date=now-datetime.timedelta(hours=1))
+		self.assertIs(future_question.was_published_recently(), False)
+		self.assertIs(old_question.was_published_recently(), False)
+		self.assertIs(recent_question.was_published_recently(), True)
+
+def create_question(question_text, days):
+	time = timezone.now() + datetime.timedelta(days=days)
+	return Question.objects.create(question_text=question_text, pub_date=time)
+
+class QuestionViewTests(TestCase):
+	
+	def test_index_view_with_no_questions(self):
+		response = self.client.get(reverse('polls:index'))
+		self.assertEqual(response.status_code, 200) # if equeal code 200, object is valid
+		self.assertContains(response, "No polls are available.")
+		self.assertQuerysetEqual(response.context['latest_question_list'], [])
+		# latest_question_list 가 비어있음([])을 확인
+
+	def test_index_view_with_a_past_question(self):
+		create_question(question_text="Past question.", days=-30)
+		response = self.client.get(reverse('polls:index'))
+		self.assertQuerysetEqual(
+			response.context['latest_question_list'],
+			['<Question: Past question.>']
+		)
+	
+	def test_index_view_with_a_future_question(self):
+		create_question(question_text="Future question.", days=30)
+		response = self.client.get(reverse('polls:index'))
+		self.assertContains(response, "No polls are available.")
+		self.assertQuerysetEqual(response.context['latest_question_list'], [])
+
+	def test_index_view_with_future_question_and_past_question(self):
+		create_question(question_text="Past question.", days=-30)
+		create_question(question_text="Future question.", days=30)
+		response = self.client.get(reverse('polls:index'))
+		self.assertQuerysetEqual(
+			response.context['latest_question_list'], ['<Question: Past question.>']
+		)
+
+	def test_index_view_with_two_past_questions(self):
+		create_question(question_text="Past question 1.", days=-30)
+		create_question(question_text="Past question 2.", days=-5)
+		response = self.client.get(reverse('polls:index'))
+		self.assertQuerysetEqual(
+			response.context['latest_question_list'],
+			['<Question: Past question 1.>', '<Question: Past question 2.>']
+		)
+
+class QuestionIndexDetailTests(TestCase):
+	
+	def test_detail_view_with_a_future_question(self):
+		future_question = create_question(question_text='Future question.', days=5)
+		url = reverse('polls:detail', args=(future_question.id,))
+		response = self.client.get(url)
+		self.assertEqual(response.status_code, 404)
+
+	def test_detail_view_with_a_past_question(self):
+		past_question = create_question(question_text='Past question.', days=-5)
+		url = reverse('polls:detail', args=(past_question.id,))
+		response = self.client.get(url)
+		self.assertContains(response, past_question.question_text)
